@@ -6,7 +6,7 @@ BashBuddy is a specialized CLI tool designed to organize your shell commands int
 
 ## Installation
 
-:exlamation: **Note**: BashBuddy is currently in development and not yet available for general use. The following instructions are intended for developers who wish to contribute to the project.
+:exclamation: **Note**: BashBuddy is currently in development and not yet available for general use. The following instructions are intended for developers who wish to contribute to the project.
 
 First, clone the repository:
 
