@@ -13,8 +13,9 @@ struct Config {
 }
 
 fn main() {
+    check_for_config_file_or_create();
     let data = fs::read_to_string(CONFIG_FILE_PATH).expect("Unable to read file");
-    let config: Config = serde_json::from_str(&data).expect("Unable to parse JSON");
+    let mut config: Config = serde_json::from_str(&data).expect("Unable to parse JSON");
 
     // Manually parse the raw arguments
     let args: Vec<String> = std::env::args().collect();
@@ -94,10 +95,10 @@ fn main() {
 
             match (alias, command) {
                 (Some(alias), Some(command)) => {
-                    add_command(category, command, alias, &config);
+                    add_command(category, command, alias, &mut config);
                 },
                 (None, None) => {
-                    add_category_to_config(category, &config);
+                    add_category_to_config(category, &mut config);
                 },
                 _ => {
                     eprintln!("Error: When specifying an alias, a command must also be provided, and vice versa.");
@@ -115,10 +116,10 @@ fn main() {
 
             match alias {
                 Some(alias) => {
-                    remove_command_from_config(category, alias, &config);
+                    remove_command_from_config(category, alias, &mut config);
                 },
                 None => {
-                    remove_category_from_config(category, &config);
+                    remove_category_from_config(category, &mut config);
                 }
             }
         },
@@ -162,7 +163,7 @@ fn handle_list_command(matches: &ArgMatches, config: &Config) {
 }
 
 
-fn add_command(category: &str, command: &str, alias: &str, config: &Config) {
+fn add_command(category: &str, command: &str, alias: &str, config: &mut Config) {
     check_for_config_file_or_create();
 
     if !check_if_category_exists(category, config) {
@@ -210,11 +211,12 @@ fn check_if_command_exists(category: &str, alias: &str, config: &Config) -> bool
     config.categories.get(category).unwrap().contains_key(alias)
 }
 
-fn add_command_to_config(category: &str, command: &str, alias: &str, config: &Config) {
-    let mut new_config = config.clone();
-    new_config.categories.get_mut(category).unwrap().insert(alias.to_string(), command.to_string());
-    let new_config_json = serde_json::to_string(&new_config).unwrap();
-    fs::write(CONFIG_FILE_PATH, new_config_json).expect("Failed to write to config file");
+fn add_command_to_config(category: &str, command: &str, alias: &str, config: &mut Config) {
+    if !config.categories.contains_key(category) {
+        config.categories.insert(category.to_string(), HashMap::new());
+    }
+    config.categories.get_mut(category).unwrap().insert(alias.to_string(), command.to_string());
+    update_config_file(config);
 }
 
 fn run_command_from_config(category: &str, alias: &str, config: &Config) {
@@ -240,26 +242,29 @@ fn run_command_from_config(category: &str, alias: &str, config: &Config) {
     }
 }
 
-fn remove_command_from_config(category: &str, command: &str, config: &Config) {
-    let mut new_config = config.clone();
-    new_config.categories.get_mut(category).unwrap().remove(command);
-    let new_config_json = serde_json::to_string(&new_config).unwrap();
-    fs::write(CONFIG_FILE_PATH, new_config_json).expect("Failed to write to config file");
+fn remove_command_from_config(category: &str, alias: &str, config: &mut Config) {
+    if let Some(commands) = config.categories.get_mut(category) {
+        if commands.remove(alias).is_some() {
+            update_config_file(config);
+        }
+    }
 }
 
-fn add_category_to_config(category: &str, config: &Config) {
-    let mut new_config = config.clone();
-    new_config.categories.insert(category.to_string(), HashMap::new());
-    let new_config_json = serde_json::to_string(&new_config).unwrap();
-    fs::write(CONFIG_FILE_PATH, new_config_json).expect("Failed to write to config file");
+
+fn add_category_to_config(category: &str, config: &mut Config) {
+    if !config.categories.contains_key(category) {
+        config.categories.insert(category.to_string(), HashMap::new());
+        update_config_file(config);
+    }
 }
 
-fn remove_category_from_config(category: &str, config: &Config) {
-    let mut new_config = config.clone();
-    new_config.categories.remove(category);
-    let new_config_json = serde_json::to_string(&new_config).unwrap();
-    fs::write(CONFIG_FILE_PATH, new_config_json).expect("Failed to write to config file");
+
+fn remove_category_from_config(category: &str, config: &mut Config) {
+    if config.categories.remove(category).is_some() {
+        update_config_file(config);
+    }
 }
+
 
 fn list_categories(config: &Config) {
     println!("Categories:");
@@ -327,3 +332,9 @@ fn list_all_aliases(config: &Config) {
         }
     }
 }
+
+fn update_config_file(config: &Config) {
+    let new_config_json = serde_json::to_string(config).expect("Failed to serialize config");
+    fs::write(CONFIG_FILE_PATH, new_config_json).expect("Failed to write to config file");
+}
+
