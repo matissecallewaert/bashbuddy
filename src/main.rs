@@ -1,10 +1,12 @@
 use clap::{Arg, ArgMatches, Command};
+use dirs_next::home_dir;
 use std::fs;
+use std::path::{Path, PathBuf};
 use serde::{Serialize, Deserialize};
 use std::collections::HashMap;
 use std::process::{Command as processCommand, Stdio};
 
-const CONFIG_FILE_PATH: &str = "/usr/local/bin/commands.json";
+const CONFIG_FILE_PATH: &str = "~/.config/bsh/commands.json";
 
 #[derive(Serialize, Deserialize, Clone)]
 struct Config {
@@ -12,11 +14,6 @@ struct Config {
 }
 
 fn main() {
-    check_for_config_file_or_create();
-    let data = fs::read_to_string(CONFIG_FILE_PATH).expect("Unable to read file");
-    let mut config: Config = serde_json::from_str(&data).expect("Unable to parse JSON");
-
-    // Manually parse the raw arguments
     let args: Vec<String> = std::env::args().collect();
     let mut clap_args = args.clone();
 
@@ -91,6 +88,12 @@ fn main() {
         )
         .get_matches_from(clap_args);
 
+    let pathbuf = check_for_config_file_or_create();
+    let path = pathbuf.as_path();
+
+    let data = fs::read_to_string(path).expect("Unable to read file");
+    let mut config: Config = serde_json::from_str(&data).expect("Unable to parse JSON");
+
     match matches.subcommand() {
         Some(("add", sub_m)) => {
             let category = sub_m.get_one::<String>("CATEGORY").unwrap();
@@ -99,10 +102,10 @@ fn main() {
 
             match (alias, command) {
                 (Some(alias), Some(command)) => {
-                    add_command(category, command, alias, &mut config);
+                    add_command(category, command, alias, &mut config, &path);
                 },
                 (None, None) => {
-                    add_category_to_config(category, &mut config);
+                    add_category_to_config(category, &mut config, &path);
                 },
                 _ => {
                     eprintln!("Error: When specifying an alias, a command must also be provided, and vice versa.");
@@ -120,10 +123,10 @@ fn main() {
 
             match alias {
                 Some(alias) => {
-                    remove_command_from_config(category, alias, &mut config);
+                    remove_command_from_config(category, alias, &mut config, &path);
                 },
                 None => {
-                    remove_category_from_config(category, &mut config);
+                    remove_category_from_config(category, &mut config, &path);
                 }
             }
         },
@@ -132,7 +135,7 @@ fn main() {
             let alias = sub_m.get_one::<String>("ALIAS").unwrap();
             let command = sub_m.get_one::<String>("COMMAND").unwrap();
 
-            update_command(category, command, alias, &mut config);
+            update_command(category, command, alias, &mut config, &path);
         },
         Some(("list", sub_m)) => {
             handle_list_command(sub_m, &config);
@@ -150,37 +153,31 @@ fn handle_list_command(matches: &ArgMatches, config: &Config) {
 }
 
 
-fn add_command(category: &str, command: &str, alias: &str, config: &mut Config) {
-    check_for_config_file_or_create();
-
+fn add_command(category: &str, command: &str, alias: &str, config: &mut Config, path: &Path) {
     if !check_if_category_exists(category, config) {
         println!("Adding Category '{}', because it does not exist", category);
-        add_category_to_config(category, config);
+        add_category_to_config(category, config, path);
     } if check_if_command_exists(category, alias, config) {
         println!("Command '{}' already exists in category '{}', if you want to update the command, add -u", command, category);
     } else {
         println!("Adding command '{}' to category '{}'", command, category);
-        add_command_to_config(category, command, alias, config);
+        add_command_to_config(category, command, alias, config, path);
     }
 }
 
-fn update_command(category: &str, command: &str, alias: &str, config: &mut Config) {
-    check_for_config_file_or_create();
-
+fn update_command(category: &str, command: &str, alias: &str, config: &mut Config, path: &Path) {
     if !check_if_category_exists(category, config) {
         println!("Adding Category '{}', because it does not exist", category);
-        add_category_to_config(category, config);
+        add_category_to_config(category, config, path);
     } if check_if_command_exists(category, alias, config) {
-        update_command_in_config(category, command, alias, config);
+        update_command_in_config(category, command, alias, config, path);
     } else {
         println!("Adding command '{}' to category '{}'", command, category);
-        add_command_to_config(category, command, alias, config);
+        add_command_to_config(category, command, alias, config, path);
     }
 }
 
 fn run_command(category: &str, alias: &str, config: &Config) {
-    check_for_config_file_or_create();
-
     if !check_if_category_exists(category, config) {
         println!("Category '{}' does not exist", category);
     } else if !check_if_command_exists(category, alias, config) {
@@ -190,17 +187,38 @@ fn run_command(category: &str, alias: &str, config: &Config) {
     }
 }
 
-fn check_for_config_file_or_create() {
-    if !config_file_exists(&CONFIG_FILE_PATH) {
-        create_config_file(&CONFIG_FILE_PATH);
+fn check_for_config_file_or_create() -> PathBuf {
+    let expanded_path = expand_home_dir(CONFIG_FILE_PATH).expect("Failed to expand home directory");
+
+    if !config_file_exists(&expanded_path) {
+        create_config_file(&expanded_path);
+    }
+
+    expanded_path
+}
+
+fn config_file_exists(path: &Path) -> bool {
+    path.exists()
+}
+
+fn expand_home_dir(path: &str) -> Option<PathBuf> {
+    if path.starts_with('~') {
+        let home = home_dir()?;
+        let remaining_path = path.strip_prefix("~").unwrap_or(path);
+        let trimmed_path = remaining_path.trim_start_matches('/');
+        Some(home.join(trimmed_path))
+    } else {
+        Some(PathBuf::from(path))
     }
 }
 
-fn config_file_exists(file_path: &str) -> bool {
-    fs::metadata(file_path).is_ok()
-}
+fn create_config_file(file_path: &Path) {
+    if let Some(parent) = file_path.parent() {
+        if let Err(e) = fs::create_dir_all(parent) {
+            panic!("Failed to create configuration directory: {}", e);
+        }
+    }
 
-fn create_config_file(file_path: &str) {
     fs::write(file_path, "{\"categories\":{}}").expect("Failed to create config file");
 }
 
@@ -212,62 +230,69 @@ fn check_if_command_exists(category: &str, alias: &str, config: &Config) -> bool
     config.categories.get(category).unwrap().contains_key(alias)
 }
 
-fn add_command_to_config(category: &str, command: &str, alias: &str, config: &mut Config) {
+fn add_command_to_config(category: &str, command: &str, alias: &str, config: &mut Config, path: &Path) {
     if !config.categories.contains_key(category) {
         config.categories.insert(category.to_string(), HashMap::new());
     }
     config.categories.get_mut(category).unwrap().insert(alias.to_string(), command.to_string());
-    update_config_file(config);
+    update_config_file(config, path);
 }
 
-fn update_command_in_config(category: &str, command: &str, alias: &str, config: &mut Config) {
+fn update_command_in_config(category: &str, command: &str, alias: &str, config: &mut Config, path: &Path) {
     config.categories.get_mut(category).unwrap().insert(alias.to_string(), command.to_string());
-    update_config_file(config);
+    update_config_file(config, path);
 }
 
 fn run_command_from_config(category: &str, alias: &str, config: &Config) {
-    let command_to_run = config.categories.get(category).unwrap().get(alias).unwrap();
+    // Retrieve the command using safe navigation
+    let command_to_run = match config.categories.get(category).and_then(|c| c.get(alias)) {
+        Some(cmd) => cmd,
+        None => {
+            eprintln!("Command for category '{}' and alias '{}' not found.", category, alias);
+            return;
+        }
+    };
 
-    let parts: Vec<&str> = command_to_run.split_whitespace().collect();
-    let (command, args) = parts.split_first().expect("No command provided");
+    // Ensure the command string is not empty
+    if command_to_run.trim().is_empty() {
+        eprintln!("Command '{}' is empty", command_to_run);
+        return;
+    }
 
-    let child = processCommand::new(command)
-        .args(args)
+    // Execute the command using a shell
+    let output = processCommand::new("sh")
+        .arg("-c")
+        .arg(command_to_run)
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
-        .spawn();
+        .output();
 
-    match child {
-        Ok(mut child) => {
-            let result = child.wait().expect("Failed to wait on child");
-            if !result.success() {
-                eprintln!("Command failed with status: {}", result);
-            }
-        },
-        Err(e) => eprintln!("Failed to start command: {}", e),
+    if let Err(e) = output {
+        eprintln!("Failed to execute command: {}", e);
     }
 }
 
-fn remove_command_from_config(category: &str, alias: &str, config: &mut Config) {
+
+fn remove_command_from_config(category: &str, alias: &str, config: &mut Config, path: &Path) {
     if let Some(commands) = config.categories.get_mut(category) {
         if commands.remove(alias).is_some() {
-            update_config_file(config);
+            update_config_file(config, path);
         }
     }
 }
 
 
-fn add_category_to_config(category: &str, config: &mut Config) {
+fn add_category_to_config(category: &str, config: &mut Config, path: &Path) {
     if !config.categories.contains_key(category) {
         config.categories.insert(category.to_string(), HashMap::new());
-        update_config_file(config);
+        update_config_file(config, path);
     }
 }
 
 
-fn remove_category_from_config(category: &str, config: &mut Config) {
+fn remove_category_from_config(category: &str, config: &mut Config, path: &Path) {
     if config.categories.remove(category).is_some() {
-        update_config_file(config);
+        update_config_file(config, path);
     }
 }
 
@@ -291,8 +316,8 @@ fn list_all_commands_with_aliases_in_category(category: &str, config: &Config) {
     }
 }
 
-fn update_config_file(config: &Config) {
+fn update_config_file(config: &Config, path: &Path) {
     let new_config_json = serde_json::to_string(config).expect("Failed to serialize config");
-    fs::write(CONFIG_FILE_PATH, new_config_json).expect("Failed to write to config file");
+    fs::write(path, new_config_json).expect("Failed to write to config file");
 }
 
