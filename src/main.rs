@@ -4,7 +4,7 @@ use serde::{Serialize, Deserialize};
 use std::collections::HashMap;
 use std::process::{Command as processCommand, Stdio};
 
-const CONFIG_FILE_PATH: &str = "commands.json";
+const CONFIG_FILE_PATH: &str = "/usr/local/bin/commands.json";
 
 #[derive(Serialize, Deserialize, Clone)]
 struct Config {
