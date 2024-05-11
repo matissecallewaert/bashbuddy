@@ -1,4 +1,3 @@
-use clap::builder::PossibleValue;
 use clap::{Arg, ArgMatches, Command};
 use std::fs;
 use serde::{Serialize, Deserialize};
@@ -22,7 +21,7 @@ fn main() {
     let mut clap_args = args.clone();
 
     // Check if the first argument is not a known subcommand and not a flag
-    if args.len() > 1 && !["run", "r", "add", "a", "delete", "d", "help", "-V", "--version", "-h", "--help", "list", "l"].contains(&args[1].as_str()) {
+    if args.len() > 1 && !["run", "r", "add", "a", "delete", "d", "help", "-V", "--version", "-h", "--help", "list", "l", "update", "u"].contains(&args[1].as_str()) {
         // Prepend the 'run' command if it appears to be missing
         clap_args.insert(1, "run".to_string());
     }
@@ -69,18 +68,23 @@ fn main() {
                     .required(false))
         )
         .subcommand(
+            Command::new("update")
+                .about("Updates a command of a category, if the category or command does not exist, it will be created")
+                .alias("u")
+                .arg(Arg::new("CATEGORY")
+                    .help("The category to update the command from")
+                    .required(true))
+                .arg(Arg::new("ALIAS")
+                    .help("The alias of the command to update")
+                    .required(true))
+                .arg(Arg::new("COMMAND")
+                    .help("The command to add")
+                    .required(true))
+        )
+        .subcommand(
             Command::new("list")
-                .about("Lists all categories, commands in a category, all commands, all commands with aliases, or all aliases")
+                .about("Lists all categories and there commands")
                 .alias("l")
-                .arg(Arg::new("type")
-                    .help("Specifies what to list: categories, commands, commands_with_aliases, aliases")
-                    .required(true)
-                    .value_parser([
-                        PossibleValue::new("categories"),
-                        PossibleValue::new("commands"),
-                        PossibleValue::new("commands_with_aliases"),
-                        PossibleValue::new("aliases")
-                    ]))
                 .arg(Arg::new("category")
                     .help("Specify the category to list commands from")
                     .required(false))
@@ -123,6 +127,13 @@ fn main() {
                 }
             }
         },
+        Some(("update", sub_m)) => {
+            let category = sub_m.get_one::<String>("CATEGORY").unwrap();
+            let alias = sub_m.get_one::<String>("ALIAS").unwrap();
+            let command = sub_m.get_one::<String>("COMMAND").unwrap();
+
+            update_command(category, command, alias, &mut config);
+        },
         Some(("list", sub_m)) => {
             handle_list_command(sub_m, &config);
         },
@@ -131,34 +142,10 @@ fn main() {
 }
 
 fn handle_list_command(matches: &ArgMatches, config: &Config) {
-    match matches.get_one::<String>("type").map(AsRef::as_ref) {
-        Some("categories") => list_categories(config),
-        Some("commands") => {
-            let category = matches.get_one::<String>("category").map(AsRef::as_ref);
-            if let Some(category) = category {
-                list_commands_in_category(category, config);
-            } else {
-                list_all_commands(config);
-            }
-        },
-        Some("commands_with_aliases") => {
-            let category = matches.get_one::<String>("category").map(AsRef::as_ref);
-            if let Some(category) = category {
-                list_all_commands_with_aliases_in_category(category, config);
-            } else {
-                list_all_commands_with_aliases(config);
-            }
-        },
-        Some("aliases") => {
-            let category = matches.get_one::<String>("category").map(AsRef::as_ref);
-            if let Some(category) = category {
-                list_aliases_in_category(category, config);
-            } else {
-                list_all_aliases(config);
-            }
-        },
-        Some(_) => eprintln!("Invalid type specified. Please specify one of: categories, commands, commands_with_aliases, aliases."),
-        None => println!("Specify what to list: categories, commands, commands_with_aliases, aliases"),
+    if let Some(category) = matches.get_one::<String>("category") {
+        list_all_commands_with_aliases_in_category(category, config);
+    } else {
+        list_all_commands_with_aliases(config);
     }
 }
 
@@ -171,6 +158,20 @@ fn add_command(category: &str, command: &str, alias: &str, config: &mut Config) 
         add_category_to_config(category, config);
     } if check_if_command_exists(category, alias, config) {
         println!("Command '{}' already exists in category '{}', if you want to update the command, add -u", command, category);
+    } else {
+        println!("Adding command '{}' to category '{}'", command, category);
+        add_command_to_config(category, command, alias, config);
+    }
+}
+
+fn update_command(category: &str, command: &str, alias: &str, config: &mut Config) {
+    check_for_config_file_or_create();
+
+    if !check_if_category_exists(category, config) {
+        println!("Adding Category '{}', because it does not exist", category);
+        add_category_to_config(category, config);
+    } if check_if_command_exists(category, alias, config) {
+        update_command_in_config(category, command, alias, config);
     } else {
         println!("Adding command '{}' to category '{}'", command, category);
         add_command_to_config(category, command, alias, config);
@@ -215,6 +216,11 @@ fn add_command_to_config(category: &str, command: &str, alias: &str, config: &mu
     if !config.categories.contains_key(category) {
         config.categories.insert(category.to_string(), HashMap::new());
     }
+    config.categories.get_mut(category).unwrap().insert(alias.to_string(), command.to_string());
+    update_config_file(config);
+}
+
+fn update_command_in_config(category: &str, command: &str, alias: &str, config: &mut Config) {
     config.categories.get_mut(category).unwrap().insert(alias.to_string(), command.to_string());
     update_config_file(config);
 }
@@ -265,48 +271,9 @@ fn remove_category_from_config(category: &str, config: &mut Config) {
     }
 }
 
-
-fn list_categories(config: &Config) {
-    println!("Categories:");
-    for category in config.categories.keys() {
-        println!("\t - {}", category);
-    }
-}
-
-fn list_commands_in_category(category: &str, config: &Config) {
-    println!("Commands in category '{}':", category);
-    if let Some(commands) = config.categories.get(category) {
-        for command in commands.values() {
-            println!("\t - {}", command);
-        }
-    } else {
-        println!("Category '{}' not found", category);
-    }
-}
-
-fn list_all_commands(config: &Config) {
-    println!("All commands:");
-    for (category, commands) in config.categories.iter() {
-        for command in commands.values() {
-            println!("\t - {}: {}", category, command);
-        }
-    }
-}
-
-fn list_aliases_in_category(category: &str, config: &Config) {
-    println!("Aliases in category '{}':", category);
-    if let Some(commands) = config.categories.get(category) {
-        for record in commands {
-            println!("\t - {} ({})", record.0, record.1);
-        }
-    } else {
-        println!("Category '{}' not found", category);
-    }
-}
-
 fn list_all_commands_with_aliases(config: &Config) {
-    println!("All commands with aliases:");
     for (category, commands) in config.categories.iter() {
+        println!("Commands in category '{}':", category);
         for (command, alias) in commands.iter() {
             println!("\t - {}: {} ({})", category, command, alias);
         }
@@ -314,22 +281,13 @@ fn list_all_commands_with_aliases(config: &Config) {
 }
 
 fn list_all_commands_with_aliases_in_category(category: &str, config: &Config) {
-    println!("Commands with aliases in category '{}':", category);
     if let Some(commands) = config.categories.get(category) {
+        println!("Commands in category '{}':", category);
         for (command, alias) in commands.iter() {
             println!("\t - {}: {} ({})", category, command, alias);
         }
     } else {
-        println!("Category '{}' not found", category);
-    }
-}
-
-fn list_all_aliases(config: &Config) {
-    println!("All aliases:");
-    for (category, commands) in config.categories.iter() {
-        for (alias, command) in commands.iter() {
-            println!("\t - {}: {} ({})", category, alias, command);
-        }
+        println!("Category '{}' does not exist", category);
     }
 }
 
