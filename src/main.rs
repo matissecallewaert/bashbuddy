@@ -290,7 +290,6 @@ fn update_command_in_config(
 }
 
 fn run_command_from_config(category: &str, alias: &str, config: &Config) {
-    // Retrieve the command using safe navigation
     let command_to_run = match config.categories.get(category).and_then(|c| c.get(alias)) {
         Some(cmd) => cmd,
         None => {
@@ -302,13 +301,11 @@ fn run_command_from_config(category: &str, alias: &str, config: &Config) {
         }
     };
 
-    // Ensure the command string is not empty
     if command_to_run.trim().is_empty() {
         eprintln!("Command '{}' is empty", command_to_run);
         return;
     }
 
-    // Execute the command using a shell
     let output = processCommand::new("sh")
         .arg("-c")
         .arg(command_to_run)
