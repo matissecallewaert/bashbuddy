@@ -1,17 +1,32 @@
 use clap::{Arg, ArgMatches, Command};
 use colored::*;
 use dirs_next::home_dir;
-use serde::{Deserialize, Serialize};
+use serde::{Serialize, Deserialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command as processCommand, Stdio};
+use tui::{backend::CrosstermBackend, Terminal};
+use tui::widgets::{Block, Borders, List, ListItem, ListState};
+use tui::layout::{Constraint, Direction, Layout};
+use tui::text::Span;
+use tui::style::{Color, Modifier, Style};
+use crossterm::event::{self, Event, KeyCode};
+use crossterm::terminal::{enable_raw_mode, disable_raw_mode};
+use std::io::{self};
 
 const CONFIG_FILE_PATH: &str = "~/.config/bsh/commands.json";
 
 #[derive(Serialize, Deserialize, Clone)]
 struct Config {
     categories: HashMap<String, HashMap<String, String>>,
+}
+
+#[derive(Default)]
+struct AppState {
+    categories: Vec<String>,
+    commands: HashMap<String, Vec<(String, String)>>,
+    selected_category: Option<usize>,
 }
 
 fn main() {
@@ -100,7 +115,7 @@ fn main() {
         )
         .subcommand(
             Command::new("list")
-                .about("Lists all categories and there commands")
+                .about("Lists all categories and their commands")
                 .alias("l")
                 .arg(Arg::new("category")
                     .help("Specify the category to list commands from")
@@ -108,59 +123,63 @@ fn main() {
         )
         .get_matches_from(clap_args);
 
-    let pathbuf = check_for_config_file_or_create();
-    let path = pathbuf.as_path();
+    if args.len() == 1 {
+        start_tui().unwrap();
+    } else {
+        let pathbuf = check_for_config_file_or_create();
+        let path = pathbuf.as_path();
 
-    let data = fs::read_to_string(path).expect("Unable to read file");
-    let mut config: Config = serde_json::from_str(&data).expect("Unable to parse JSON");
+        let data = fs::read_to_string(path).expect("Unable to read file");
+        let mut config: Config = serde_json::from_str(&data).expect("Unable to parse JSON");
 
-    match matches.subcommand() {
-        Some(("add", sub_m)) => {
-            let category = sub_m.get_one::<String>("CATEGORY").unwrap();
-            let alias = sub_m.get_one::<String>("ALIAS");
-            let command = sub_m.get_one::<String>("COMMAND");
+        match matches.subcommand() {
+            Some(("add", sub_m)) => {
+                let category = sub_m.get_one::<String>("CATEGORY").unwrap();
+                let alias = sub_m.get_one::<String>("ALIAS");
+                let command = sub_m.get_one::<String>("COMMAND");
 
-            match (alias, command) {
-                (Some(alias), Some(command)) => {
-                    add_command(category, command, alias, &mut config, &path);
+                match (alias, command) {
+                    (Some(alias), Some(command)) => {
+                        add_command(category, command, alias, &mut config, &path);
+                    },
+                    (None, None) => {
+                        add_category_to_config(category, &mut config, &path);
+                    },
+                    _ => {
+                        eprintln!("Error: When specifying an alias, a command must also be provided, and vice versa.");
+                    }
                 }
-                (None, None) => {
-                    add_category_to_config(category, &mut config, &path);
-                }
-                _ => {
-                    eprintln!("Error: When specifying an alias, a command must also be provided, and vice versa.");
-                }
-            }
-        }
-        Some(("run", sub_m)) => {
-            let category = sub_m.get_one::<String>("CATEGORY").unwrap();
-            let alias = sub_m.get_one::<String>("ALIAS").unwrap();
-            run_command(category, alias, &config);
-        }
-        Some(("delete", sub_m)) => {
-            let category = sub_m.get_one::<String>("CATEGORY").unwrap();
-            let alias = sub_m.get_one::<String>("ALIAS");
+            },
+            Some(("run", sub_m)) => {
+                let category = sub_m.get_one::<String>("CATEGORY").unwrap();
+                let alias = sub_m.get_one::<String>("ALIAS").unwrap();
+                run_command(category, alias, &config);
+            },
+            Some(("delete", sub_m)) => {
+                let category = sub_m.get_one::<String>("CATEGORY").unwrap();
+                let alias = sub_m.get_one::<String>("ALIAS");
 
-            match alias {
-                Some(alias) => {
-                    remove_command_from_config(category, alias, &mut config, &path);
+                match alias {
+                    Some(alias) => {
+                        remove_command_from_config(category, alias, &mut config, &path);
+                    },
+                    None => {
+                        remove_category_from_config(category, &mut config, &path);
+                    }
                 }
-                None => {
-                    remove_category_from_config(category, &mut config, &path);
-                }
-            }
-        }
-        Some(("update", sub_m)) => {
-            let category = sub_m.get_one::<String>("CATEGORY").unwrap();
-            let alias = sub_m.get_one::<String>("ALIAS").unwrap();
-            let command = sub_m.get_one::<String>("COMMAND").unwrap();
+            },
+            Some(("update", sub_m)) => {
+                let category = sub_m.get_one::<String>("CATEGORY").unwrap();
+                let alias = sub_m.get_one::<String>("ALIAS").unwrap();
+                let command = sub_m.get_one::<String>("COMMAND").unwrap();
 
-            update_command(category, command, alias, &mut config, &path);
+                update_command(category, command, alias, &mut config, &path);
+            },
+            Some(("list", sub_m)) => {
+                handle_list_command(sub_m, &config);
+            },
+            _ => {},
         }
-        Some(("list", sub_m)) => {
-            handle_list_command(sub_m, &config);
-        }
-        _ => {}
     }
 }
 
@@ -170,6 +189,101 @@ fn handle_list_command(matches: &ArgMatches, config: &Config) {
     } else {
         list_all_commands_with_aliases(config);
     }
+}
+
+fn start_tui() -> Result<(), io::Error> {
+    enable_raw_mode()?;
+    let mut stdout = io::stdout();
+    let backend = CrosstermBackend::new(&mut stdout);
+    let mut terminal = Terminal::new(backend)?;
+    let mut app_state = AppState::default();
+    
+    let pathbuf = check_for_config_file_or_create();
+    let path = pathbuf.as_path();
+    let data = fs::read_to_string(path).expect("Unable to read file");
+    let config: Config = serde_json::from_str(&data).expect("Unable to parse JSON");
+
+    app_state.categories = config.categories.keys().cloned().collect();
+    for (category, commands) in &config.categories {
+        let cmd_list: Vec<(String, String)> = commands.iter().map(|(alias, cmd)| (alias.clone(), cmd.clone())).collect();
+        app_state.commands.insert(category.clone(), cmd_list);
+    }
+
+    loop {
+        terminal.draw(|f| {
+            let size = f.size();
+
+            let chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .margin(1)
+                .constraints([
+                    Constraint::Percentage(10),
+                    Constraint::Percentage(80),
+                    Constraint::Percentage(10),
+                ].as_ref())
+                .split(size);
+
+            let block = Block::default()
+                .title("bsh TUI")
+                .borders(Borders::ALL);
+            f.render_widget(block, size);
+
+            let category_list: Vec<ListItem> = app_state.categories.iter().map(|c| {
+                let style = if app_state.selected_category == Some(app_state.categories.iter().position(|x| x == c).unwrap()) {
+                    Style::default().fg(Color::Yellow)
+                } else {
+                    Style::default()
+                };
+                ListItem::new(Span::styled(c.to_string(), style))
+            }).collect();
+
+            let categories = List::new(category_list)
+                .block(Block::default().borders(Borders::ALL).title("Categories"))
+                .highlight_style(Style::default().add_modifier(Modifier::BOLD));
+            f.render_stateful_widget(categories, chunks[1], &mut ListState::default());
+        })?;
+
+        if let Event::Key(key) = event::read()? {
+            match key.code {
+                KeyCode::Char('q') => {
+                    disable_raw_mode()?;
+                    terminal.clear()?;
+                    break;
+                },
+                KeyCode::Up => {
+                    if let Some(selected) = app_state.selected_category {
+                        if selected > 0 {
+                            app_state.selected_category = Some(selected - 1);
+                        }
+                    } else {
+                        app_state.selected_category = Some(0);
+                    }
+                },
+                KeyCode::Down => {
+                    if let Some(selected) = app_state.selected_category {
+                        if selected < app_state.categories.len() - 1 {
+                            app_state.selected_category = Some(selected + 1);
+                        }
+                    } else {
+                        app_state.selected_category = Some(0);
+                    }
+                },
+                KeyCode::Enter => {
+                    if let Some(selected) = app_state.selected_category {
+                        let category = &app_state.categories[selected];
+                        if let Some(commands) = app_state.commands.get(category) {
+                            for (alias, command) in commands {
+                                println!("{}: {}", alias, command);
+                            }
+                        }
+                    }
+                },
+                _ => {}
+            }
+        }
+    }
+
+    Ok(())
 }
 
 fn add_command(category: &str, command: &str, alias: &str, config: &mut Config, path: &Path) {
