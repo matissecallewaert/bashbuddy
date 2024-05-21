@@ -6,8 +6,7 @@ BashBuddy is a specialized CLI tool designed to organize your shell commands int
 
 ## Installation
 
-:exclamation: **Note**: BashBuddy is currently in development and not yet available for general use. The following instructions are intended for developers who wish to contribute to the project.
-
+### Development
 First, clone the repository:
 
 ```bash
@@ -28,26 +27,38 @@ cargo run -- help
 
 ## Usage
 
+### Using the TUI (Terminal User Interface)
+
+To launch the TUI, run the following command:
+
+```bash
+bsh
+```
+
+![bsh tui](tui.png)
+
+### Using the CLI (Command Line Interface)
+
 Execute commands using:
 
 ```bash
 bsh [CATEGORY] [COMMAND]
 ``` 
 
-### Available Commands
+#### Available Commands
 
 - **add or a**: Adds a new command to a category or creates a new category if no command is given.
 - **run or r**: Executes a command from a specified category.
 - **delete or d**: Removes a command from a category or deletes the category entirely if no command is specified.
 
-### Global Options
+#### Global Options
 
 - `-h, --help`: Displays help information.
 - `-V, --version`: Displays the version information.
 
-### Detailed Command Usage
+#### Detailed Command Usage
 
-#### Adding Commands or Categories
+##### Adding Commands or Categories
 
 ```bash
 bsh add <CATEGORY> [ALIAS] [COMMAND]
@@ -63,7 +74,7 @@ bsh a utilities ping 'ping example.com'
 ```
 This adds a new command 'ping example.com' with alias 'ping' to the 'utilities' category.
 
-#### Running Commands
+##### Running Commands
 
 ```bash
 bsh r <CATEGORY> <ALIAS>
@@ -78,7 +89,7 @@ bsh run utilities ping
 ```
 This executes the 'ping' command in the 'utilities' category.
 
-#### Deleting Commands or Categories
+##### Deleting Commands or Categories
 
 ```bash
 bsh delete <CATEGORY> [ALIAS]
