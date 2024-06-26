@@ -48,6 +48,7 @@ bsh [CATEGORY] [COMMAND]
 #### Available Commands
 
 - **add or a**: Adds a new command to a category or creates a new category if no command is given.
+- - **update or u**: Updates or adds a command to a category.
 - **run or r**: Executes a command from a specified category.
 - **delete or d**: Removes a command from a category or deletes the category entirely if no command is specified.
 
@@ -87,6 +88,10 @@ bsh r <CATEGORY> <ALIAS>
 ```bash
 bsh run utilities ping
 ```
+You can also run it like this:
+```bash
+bsh utilities ping
+```
 This executes the 'ping' command in the 'utilities' category.
 
 ##### Deleting Commands or Categories
@@ -109,7 +114,12 @@ This removes the 'ping' command from the 'utilities' category.
 ### Additional Information
 
 - For a complete list of commands and their options, you can always run `bsh help` or `bsh help [COMMAND]` for details about a specific command.
+- You can use placeholders in you commands which will be prompted when you want to run the command. You can add such a command as follows or use the TUI:
+    ```bsh
+    bsh a utilities rustiflow "sudo RUST_LOG=info rustiflow realtime wlo1 <[flow]> <[seconds]> print"
+    ```
 
-### License
+
+## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.

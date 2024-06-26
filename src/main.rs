@@ -9,7 +9,7 @@ use dirs_next::home_dir;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
-use std::io::{self};
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command as processCommand, Stdio};
 use tui::layout::{Constraint, Direction, Layout, Rect};
@@ -257,7 +257,7 @@ fn start_tui() -> Result<(), io::Error> {
     loop {
         terminal.draw(|f| {
             let size = f.size();
-        
+
             // Split the layout into vertical chunks
             let vertical_chunks = Layout::default()
                 .direction(Direction::Vertical)
@@ -270,7 +270,7 @@ fn start_tui() -> Result<(), io::Error> {
                     .as_ref(),
                 )
                 .split(size);
-        
+
             // Split the logo and control instructions horizontally
             let logo_and_controls = Layout::default()
                 .direction(Direction::Horizontal)
@@ -282,7 +282,7 @@ fn start_tui() -> Result<(), io::Error> {
                     .as_ref(),
                 )
                 .split(vertical_chunks[0]);
-        
+
             // Render the logo in the top left chunk
             let logo_paragraph = Paragraph::new(vec![
                 Spans::from(Span::styled(
@@ -325,7 +325,7 @@ fn start_tui() -> Result<(), io::Error> {
             .block(Block::default().borders(Borders::NONE))
             .style(Style::default().add_modifier(Modifier::BOLD));
             f.render_widget(logo_paragraph, logo_and_controls[0]);
-        
+
             // Render the controls in the top right chunk
             let controls_paragraph = Paragraph::new(vec![
                 Spans::from(Span::styled(
@@ -335,7 +335,7 @@ fn start_tui() -> Result<(), io::Error> {
                         .add_modifier(Modifier::BOLD),
                 )),
                 Spans::from(Span::styled(
-                    "q - Quit",
+                    "ESC - Quit",
                     Style::default()
                         .fg(Color::White)
                         .add_modifier(Modifier::BOLD),
@@ -362,7 +362,7 @@ fn start_tui() -> Result<(), io::Error> {
             .block(Block::default().borders(Borders::NONE))
             .style(Style::default().add_modifier(Modifier::BOLD));
             f.render_widget(controls_paragraph, logo_and_controls[1]);
-        
+
             // Split the bottom chunk into horizontal chunks
             let horizontal_chunks = Layout::default()
                 .direction(Direction::Horizontal)
@@ -376,19 +376,28 @@ fn start_tui() -> Result<(), io::Error> {
                     .as_ref(),
                 )
                 .split(vertical_chunks[1]);
-        
+
             // Render categories
             if app_state.categories.is_empty() {
                 let no_categories_paragraph = Paragraph::new(Span::styled(
                     "No categories",
-                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
                 ))
-                .block(Block::default().borders(Borders::ALL).border_style(Style::default()
-                .add_modifier(Modifier::BOLD)
-                .fg(Color::Yellow)).title(Spans::from(Span::styled(
-                    "Categories",
-                    Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
-                ))));
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .border_style(
+                            Style::default()
+                                .add_modifier(Modifier::BOLD)
+                                .fg(Color::Yellow),
+                        )
+                        .title(Spans::from(Span::styled(
+                            "Categories",
+                            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+                        ))),
+                );
                 f.render_widget(no_categories_paragraph, horizontal_chunks[0]);
             } else {
                 let category_list: Vec<ListItem> = app_state
@@ -406,7 +415,7 @@ fn start_tui() -> Result<(), io::Error> {
                         ListItem::new(Span::styled(c.to_string(), style))
                     })
                     .collect();
-        
+
                 let border_style_categories = if app_state.mode == Mode::Category {
                     Style::default()
                         .fg(Color::Yellow)
@@ -416,7 +425,7 @@ fn start_tui() -> Result<(), io::Error> {
                         .fg(Color::Blue)
                         .add_modifier(Modifier::BOLD)
                 };
-        
+
                 let categories = List::new(category_list)
                     .block(
                         Block::default()
@@ -435,11 +444,14 @@ fn start_tui() -> Result<(), io::Error> {
                     .highlight_symbol("> ");
                 f.render_stateful_widget(categories, horizontal_chunks[0], &mut category_state);
             }
-        
+
             // Render commands for the selected category
             if let Some(selected_category) = app_state.selected_category {
                 if selected_category < app_state.categories.len() {
-                    if let Some(commands) = app_state.commands.get(&app_state.categories[selected_category]) {
+                    if let Some(commands) = app_state
+                        .commands
+                        .get(&app_state.categories[selected_category])
+                    {
                         let command_list: Vec<ListItem> = commands
                             .iter()
                             .enumerate()
@@ -461,14 +473,17 @@ fn start_tui() -> Result<(), io::Error> {
                                 } else {
                                     Spans::from(vec![
                                         Span::raw("  "),
-                                        Span::styled(alias.clone(), Style::default().fg(Color::Green)),
+                                        Span::styled(
+                                            alias.clone(),
+                                            Style::default().fg(Color::Green),
+                                        ),
                                         Span::raw(format!(": {}", command)),
                                     ])
                                 };
                                 ListItem::new(content)
                             })
                             .collect();
-        
+
                         let border_style_command = if app_state.mode == Mode::Command {
                             Style::default()
                                 .fg(Color::Yellow)
@@ -478,7 +493,7 @@ fn start_tui() -> Result<(), io::Error> {
                                 .fg(Color::Blue)
                                 .add_modifier(Modifier::BOLD)
                         };
-        
+
                         let commands_list = List::new(command_list)
                             .block(
                                 Block::default()
@@ -489,7 +504,9 @@ fn start_tui() -> Result<(), io::Error> {
                                             "Commands in {}",
                                             &app_state.categories[selected_category]
                                         ),
-                                        Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+                                        Style::default()
+                                            .fg(Color::Red)
+                                            .add_modifier(Modifier::BOLD),
                                     ))),
                             )
                             .highlight_style(Style::default());
@@ -498,10 +515,10 @@ fn start_tui() -> Result<(), io::Error> {
                             horizontal_chunks[1],
                             &mut command_state,
                         );
-        
+
                         // Define a fixed height for each button
                         let button_height = 1; // Adjust this value to match the height of the list item text
-        
+
                         // Render update buttons for each command
                         let update_buttons: Vec<Paragraph> = commands
                             .iter()
@@ -523,18 +540,20 @@ fn start_tui() -> Result<(), io::Error> {
                                     .block(Block::default().borders(Borders::NONE).style(style))
                             })
                             .collect();
-        
+
                         // Render update buttons for each command
                         for (i, button) in update_buttons.into_iter().enumerate() {
                             let button_area = tui::layout::Rect {
                                 x: horizontal_chunks[2].x,
-                                y: horizontal_chunks[2].y + (i as u16 * button_height) + button_height,
+                                y: horizontal_chunks[2].y
+                                    + (i as u16 * button_height)
+                                    + button_height,
                                 width: horizontal_chunks[2].width,
                                 height: button_height,
                             };
                             f.render_widget(button, button_area);
                         }
-        
+
                         // Render delete buttons for each command
                         let delete_buttons: Vec<Paragraph> = commands
                             .iter()
@@ -554,11 +573,13 @@ fn start_tui() -> Result<(), io::Error> {
                                     .block(Block::default().borders(Borders::NONE).style(style))
                             })
                             .collect();
-        
+
                         for (i, button) in delete_buttons.into_iter().enumerate() {
                             let button_area = tui::layout::Rect {
                                 x: horizontal_chunks[3].x,
-                                y: horizontal_chunks[3].y + (i as u16 * button_height) + button_height,
+                                y: horizontal_chunks[3].y
+                                    + (i as u16 * button_height)
+                                    + button_height,
                                 width: horizontal_chunks[3].width,
                                 height: button_height,
                             };
@@ -567,7 +588,7 @@ fn start_tui() -> Result<(), io::Error> {
                     }
                 }
             }
-        
+
             if app_state.input_mode == InputMode::Editing
                 || app_state.input_mode == InputMode::Adding
             {
@@ -607,7 +628,7 @@ fn start_tui() -> Result<(), io::Error> {
                         ))
                     }
                 };
-        
+
                 let input_content =
                     if app_state.input.is_empty() && app_state.input_mode == InputMode::Adding {
                         if app_state.mode == Mode::Category {
@@ -624,7 +645,7 @@ fn start_tui() -> Result<(), io::Error> {
                     } else {
                         Spans::from(app_state.input.as_ref())
                     };
-        
+
                 let input_box = Paragraph::new(input_content).block(
                     Block::default()
                         .borders(Borders::ALL)
@@ -635,7 +656,7 @@ fn start_tui() -> Result<(), io::Error> {
                         )
                         .title(title),
                 );
-        
+
                 let area = if app_state.mode == Mode::Category {
                     Rect::new(
                         horizontal_chunks[0].x,
@@ -651,18 +672,18 @@ fn start_tui() -> Result<(), io::Error> {
                         horizontal_chunks[1].height,
                     )
                 };
-        
+
                 f.render_widget(Clear, area);
                 f.render_widget(input_box, area);
                 f.set_cursor(area.x + app_state.input.len() as u16 + 1, area.y + 1);
             }
-        })?;        
+        })?;
 
         if let Event::Key(key) = event::read()? {
             match app_state.input_mode {
                 InputMode::Normal => match app_state.mode {
                     Mode::Category => match key.code {
-                        KeyCode::Char('q') => {
+                        KeyCode::Esc => {
                             disable_raw_mode()?;
                             execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
                             terminal.show_cursor()?;
@@ -720,7 +741,7 @@ fn start_tui() -> Result<(), io::Error> {
                         _ => {}
                     },
                     Mode::Command => match key.code {
-                        KeyCode::Char('q') => {
+                        KeyCode::Esc => {
                             disable_raw_mode()?;
                             execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
                             terminal.show_cursor()?;
@@ -736,7 +757,9 @@ fn start_tui() -> Result<(), io::Error> {
                         }
                         KeyCode::Down => {
                             if let Some(selected) = command_state.selected() {
-                                if let Some(commands) = app_state.commands.get(&app_state.categories[app_state.selected_category.unwrap()]) {
+                                if let Some(commands) = app_state.commands.get(
+                                    &app_state.categories[app_state.selected_category.unwrap()],
+                                ) {
                                     let commands_len = commands.len();
                                     if commands_len == 0 || selected >= commands_len - 1 {
                                         app_state.input_mode = InputMode::Adding;
@@ -747,7 +770,7 @@ fn start_tui() -> Result<(), io::Error> {
                                     }
                                 }
                             }
-                        }                                        
+                        }
                         KeyCode::Left => {
                             app_state.mode = Mode::Category;
                             app_state.selected_command = None;
@@ -1089,9 +1112,30 @@ fn run_command_from_config(category: &str, alias: &str, config: &Config) {
         return;
     }
 
+    let mut final_command = command_to_run.clone();
+    while let Some(start) = final_command.find("<[") {
+        if let Some(end) = final_command[start..].find("]>") {
+            let placeholder = &final_command[start + 2..start + end];
+            print!("Please enter a value for {}: ", placeholder);
+            io::stdout().flush().unwrap();
+            let mut input = String::new();
+            io::stdin()
+                .read_line(&mut input)
+                .expect("Failed to read input");
+            let input = input.trim();
+            final_command = final_command.replacen(&format!("<[{}]>", placeholder), input, 1);
+        } else {
+            eprintln!(
+                "Mismatched placeholder brackets in command: {}",
+                final_command
+            );
+            return;
+        }
+    }
+
     let output = processCommand::new("sh")
         .arg("-c")
-        .arg(command_to_run)
+        .arg(final_command)
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
         .output();
